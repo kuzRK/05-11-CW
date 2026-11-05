@@ -31,6 +31,7 @@ struct th_pool_t
   ~th_pool_t();
 
   void submit(f_t f);
+  void wait();
 
 private:
   void execute();
@@ -38,6 +39,8 @@ private:
   std::queue<f_t> tasks_;
   std::mutex mx_;
   std::condition_variable cd_;
+  std::condition_variable done_cd_;
+  std::size_t active_{0};
   bool stop_{false};
   std::vector<std::thread> ths_;
 };
@@ -93,6 +96,8 @@ void th_pool_t::execute()
     auto task = std::move(tasks_.front());
     tasks_.pop();
 
+    ++active_;
+
     lck.unlock();
 
     try
@@ -100,17 +105,36 @@ void th_pool_t::execute()
       task();
     }
     catch (...)
+    {}
+
+    lck.lock();
+    --active_;
+
+    if (tasks_.empty() && active_ == 0)
     {
+      done_cd_.notify_all();
     }
   }
 }
 
-int main()
-{
-  th_pool_t pool(3);
+void th_pool_t::wait() {
+    std::unique_lock<std::mutex> lck(mx_);
 
-  for (int i = 0; i < 6; ++i)
-  {
-    pool.submit(task_t{});
-  }
+    done_cd_.wait(lck, [this]() {
+        return tasks_.empty() && active_ == 0;
+    });
 }
+
+
+int main() {
+    th_pool_t pool(3);
+
+    for (int i = 0; i < 6; ++i) {
+        pool.submit(task_t{});
+    }
+
+    pool.wait();
+
+    std::cout << "All tasks finished.\n";
+}
+
