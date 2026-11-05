@@ -32,6 +32,8 @@ struct th_pool_t
 
   void submit(f_t f);
   void wait();
+  void pause();
+  void resume();
 
 private:
   void execute();
@@ -42,6 +44,7 @@ private:
   std::condition_variable done_cd_;
   std::size_t active_{0};
   bool stop_{false};
+  bool paused_{false};
   std::vector<std::thread> ths_;
 };
 
@@ -86,7 +89,7 @@ void th_pool_t::execute()
     std::unique_lock<std::mutex> lck(mx_);
 
     cd_.wait(lck, [this]()
-             { return stop_ || !tasks_.empty(); });
+             { return stop_ || (!paused_ && !tasks_.empty()); });
 
     if (stop_ && tasks_.empty())
     {
@@ -117,24 +120,50 @@ void th_pool_t::execute()
   }
 }
 
-void th_pool_t::wait() {
-    std::unique_lock<std::mutex> lck(mx_);
+void th_pool_t::wait()
+{
+  std::unique_lock<std::mutex> lck(mx_);
 
-    done_cd_.wait(lck, [this]() {
-        return tasks_.empty() && active_ == 0;
-    });
+  done_cd_.wait(lck, [this]()
+                { return tasks_.empty() && active_ == 0; });
 }
 
+void th_pool_t::pause()
+{
+  std::lock_guard<std::mutex> lck(mx_);
+  paused_ = true;
+}
+
+void th_pool_t::resume()
+{
+  {
+    std::lock_guard<std::mutex> lck(mx_);
+    paused_ = false;
+  }
+
+  cd_.notify_all();
+}
 
 int main() {
     th_pool_t pool(3);
+
+    pool.pause();
 
     for (int i = 0; i < 6; ++i) {
         pool.submit(task_t{});
     }
 
+    std::cout << "Pool paused.\n" << std::flush;
+
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(300)
+    );
+
+    std::cout << "Resuming...\n" << std::flush;
+
+    pool.resume();
+
     pool.wait();
 
     std::cout << "All tasks finished.\n";
 }
-
