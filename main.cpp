@@ -157,17 +157,33 @@ private:
     std::vector<std::thread> ths_;
 };
 
+
 int main() {
+    std::mutex cout_mx;
     th_pool_t pool(3, 2);
 
-    for (int i = 0; i < 6; ++i) {
-        pool.submit([i]() {
+    pool.pause();
+
+    for (int i = 0; i < 18; ++i) {
+        int milliseconds = (i % 3 == 0) ? 500 : 40;
+
+        pool.submit([i, milliseconds, &cout_mx]() {
             std::this_thread::sleep_for(
-                std::chrono::milliseconds(100)
+                std::chrono::milliseconds(milliseconds)
             );
+
+            std::lock_guard<std::mutex> lock(cout_mx);
+
+            std::cout << "Task " << i
+                      << " (" << milliseconds << " ms)"
+                      << " on thread "
+                      << std::this_thread::get_id()
+                      << '\n';
         });
     }
 
+    pool.resume();
     pool.wait();
-    std::cout << "Finished\n";
+
+    std::cout << "All tasks finished\n";
 }
